@@ -1,0 +1,320 @@
+{% extends 'tracker/base.html' %}
+{% load static %}
+
+{% block title %}Map View - Parliament Tracker{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    #map {
+        height: 600px;
+        width: 100%;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .info {
+        padding: 6px 8px;
+        font: 14px/16px Arial, Helvetica, sans-serif;
+        background: white;
+        background: rgba(255,255,255,0.9);
+        box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        border-radius: 5px;
+        border: 1px solid #ccc;
+    }
+    .info h4 {
+        margin: 0 0 5px;
+        color: #777;
+    }
+    .legend {
+        line-height: 18px;
+        color: #555;
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    }
+    .legend i {
+        width: 18px;
+        height: 18px;
+        float: left;
+        margin-right: 8px;
+        opacity: 0.7;
+    }
+    .filter-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255,255,255,0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+    .map-container {
+        position: relative;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-4">Geographical Distribution of Bills</h1>
+    
+    <!-- Filter Card -->
+    <div class="filter-card">
+        <form id="filter-form" class="row g-3">
+            {% csrf_token %}
+            <div class="col-md-4">
+                <label class="form-label">Bill Status</label>
+                <select name="status" class="form-control" id="status-filter">
+                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Status</option>
+                    <option value="PASSED" {% if status_filter == 'PASSED' %}selected{% endif %}>Passed</option>
+                    <option value="PENDING" {% if status_filter == 'PENDING' %}selected{% endif %}>Pending</option>
+                    <option value="REJECTED" {% if status_filter == 'REJECTED' %}selected{% endif %}>Rejected</option>
+                    <option value="WITHDRAWN" {% if status_filter == 'WITHDRAWN' %}selected{% endif %}>Withdrawn</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Year</label>
+                <select name="year" class="form-control" id="year-filter">
+                    <option value="all" {% if year_filter == 'all' %}selected{% endif %}>All Years</option>
+                    {% for year in years %}
+                    <option value="{{ year }}" {% if year_filter == year|stringformat:"s" %}selected{% endif %}>{{ year }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="button" class="btn btn-primary w-100" id="update-map">
+                    <i class="fas fa-sync-alt"></i> Update Map
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Map and Stats Row -->
+    <div class="row">
+        <div class="col-md-9">
+            <div class="card map-container">
+                <div class="loading-overlay" id="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div id="stats">
+                        <p><strong>Total Bills:</strong> <span id="total-bills">{{ total_bills }}</span></p>
+                        <p><strong>States with Bills:</strong> <span id="states-count">0</span></p>
+                        <hr>
+                        <h6>Top States:</h6>
+                        <ul id="top-states" class="list-unstyled">
+                            <!-- Will be populated by JS -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let map;
+        let geojsonLayer;
+        
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([22.0, 79.0], 5);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+        }
+        
+        // Load GeoJSON and update map with data
+        function loadMapData() {
+            const status = document.getElementById('status-filter').value;
+            const year = document.getElementById('year-filter').value;
+            
+            // Show loading overlay
+            document.getElementById('loading-overlay').style.display = 'flex';
+            
+            // Fetch data via AJAX
+            fetch(`/map/?status=${status}&year=${year}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Update statistics
+                updateStats(data.states_data, data.total_bills);
+                
+                // Load GeoJSON and update map
+                return fetch('https://raw.githubusercontent.com/geohacker/india/master/state/india_telangana.geojson')
+                    .then(response => response.json())
+                    .then(geojson => {
+                        updateMap(geojson, data.states_data);
+                    });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                // Fallback to circles
+                addFallbackMarkers([]);
+            })
+            .finally(() => {
+                document.getElementById('loading-overlay').style.display = 'none';
+            });
+        }
+        
+        function updateMap(geojson, statesData) {
+            // Create a map of state -> count
+            const stateCounts = {};
+            statesData.forEach(item => {
+                stateCounts[item.state] = item.count;
+            });
+            
+            // Remove existing layer if any
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+            
+            // Add new layer
+            geojsonLayer = L.geoJson(geojson, {
+                style: function(feature) {
+                    const stateName = feature.properties.NAME_1;
+                    const count = stateCounts[stateName] || 0;
+                    return {
+                        fillColor: getColor(count),
+                        weight: 1,
+                        opacity: 1,
+                        color: 'white',
+                        fillOpacity: 0.7
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const stateName = feature.properties.NAME_1;
+                    const count = stateCounts[stateName] || 0;
+                    layer.bindPopup(`
+                        <b>${stateName}</b><br>
+                        Bills: ${count}<br>
+                        <a href="/bills/?search=${stateName}">View Bills</a>
+                    `);
+                    
+                    layer.on('mouseover', function() {
+                        this.setStyle({ fillOpacity: 0.9, weight: 2 });
+                    });
+                    layer.on('mouseout', function() {
+                        this.setStyle({ fillOpacity: 0.7, weight: 1 });
+                    });
+                }
+            }).addTo(map);
+            
+            // Fit map to bounds if first time
+            if (!map.getBounds().isValid()) {
+                map.fitBounds(geojsonLayer.getBounds());
+            }
+        }
+        
+        function getColor(count) {
+            return count > 10 ? '#800026' :
+                   count > 5  ? '#BD0026' :
+                   count > 3  ? '#E31A1C' :
+                   count > 1  ? '#FC4E2A' :
+                   count > 0  ? '#FD8D3C' :
+                                '#FFEDA0';
+        }
+        
+        function updateStats(statesData, totalBills) {
+            document.getElementById('total-bills').textContent = totalBills;
+            
+            const stateCounts = {};
+            statesData.forEach(item => {
+                stateCounts[item.state] = item.count;
+            });
+            
+            const states = Object.keys(stateCounts).filter(s => s !== 'Other');
+            document.getElementById('states-count').textContent = states.length;
+            
+            // Get top 5 states by count
+            const topStates = Object.entries(stateCounts)
+                .filter(([state]) => state !== 'Other')
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            
+            const topList = document.getElementById('top-states');
+            topList.innerHTML = '';
+            topStates.forEach(([state, count]) => {
+                topList.innerHTML += `<li><strong>${state}:</strong> ${count} bills</li>`;
+            });
+        }
+        
+        function addFallbackMarkers(statesData) {
+            // Fallback markers for major cities
+            const cities = [
+                { name: 'Delhi', lat: 28.6139, lon: 77.2090, count: 25 },
+                { name: 'Mumbai', lat: 19.0760, lon: 72.8777, count: 15 },
+                { name: 'Chennai', lat: 13.0827, lon: 80.2707, count: 12 },
+                { name: 'Kolkata', lat: 22.5726, lon: 88.3639, count: 8 },
+                { name: 'Bengaluru', lat: 12.9716, lon: 77.5946, count: 10 },
+                { name: 'Hyderabad', lat: 17.3850, lon: 78.4867, count: 7 }
+            ];
+            
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+            
+            cities.forEach(city => {
+                const radius = Math.sqrt(city.count) * 20000;
+                const color = getColor(city.count);
+                
+                L.circle([city.lat, city.lon], {
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.5,
+                    radius: radius
+                })
+                .addTo(map)
+                .bindPopup(`<b>${city.name}</b><br>Bills: ${city.count}`);
+            });
+        }
+        
+        // Initialize map on page load
+        initMap();
+        
+        // Load initial data
+        loadMapData();
+        
+        // Update map on button click
+        document.getElementById('update-map').addEventListener('click', loadMapData);
+        
+        // Also update on filter change (optional)
+        document.getElementById('status-filter').addEventListener('change', loadMapData);
+        document.getElementById('year-filter').addEventListener('change', loadMapData);
+        
+        // Auto-refresh every 5 minutes to get new bills
+        setInterval(loadMapData, 5 * 60 * 1000); // 5 minutes
+    });
+</script>
+{% endblock %}

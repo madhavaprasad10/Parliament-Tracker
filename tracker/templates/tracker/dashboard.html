@@ -1,0 +1,162 @@
+{% extends 'tracker/base.html' %}
+{% load static %}
+
+{% block title %}Dashboard - Parliament Tracker{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="mb-4">Dashboard</h1>
+    
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">Total Bills</h5>
+                    <h2>{{ total_bills }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">Active Bills</h5>
+                    <h2>{{ active_bills }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <h5 class="card-title">Passed</h5>
+                    <h2>{{ bills_passed }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <h5 class="card-title">Success Rate</h5>
+                    <h2>{{ passing_rate }}%</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Debug Info - Remove after fixing -->
+    <div class="alert alert-info">
+        <h6>Debug Information:</h6>
+        <p>Recent bills count: {{ recent_bills|length }}</p>
+        {% if recent_bills %}
+            <p>First bill object type: {{ recent_bills.0|stringformat:"s" }}</p>
+            <p>First bill attributes:</p>
+            <ul>
+            {% for key, value in recent_bills.0.items %}
+                <li><strong>{{ key }}:</strong> {{ value }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No recent bills found in context</p>
+        {% endif %}
+    </div>
+    
+    <div class="row">
+        <!-- Recent Bills -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Recent Bills</h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_bills %}
+                        <div class="list-group">
+                            {% for bill in recent_bills %}
+                                <a href="{% url 'bill_detail' bill.id %}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex w-100 justify-content-between">
+                                        <h6 class="mb-1">
+                                            {% if bill.bill_number %}
+                                                [{{ bill.bill_number }}]
+                                            {% endif %}
+                                            {{ bill.title }}
+                                        </h6>
+                                        <small>{{ bill.introduced_date|date:"M d, Y"|default:"No date" }}</small>
+                                    </div>
+                                    <p class="mb-1">
+                                        <span class="badge bg-secondary">{{ bill.get_status_display|default:"Unknown" }}</span>
+                                        {% if bill.bill_type %}
+                                            <span class="badge bg-info">{{ bill.get_bill_type_display }}</span>
+                                        {% endif %}
+                                    </p>
+                                    {% if bill.introduced_by %}
+                                        <small>Introduced by: {{ bill.introduced_by.name }}</small>
+                                    {% endif %}
+                                    {% if bill.summary %}
+                                        <p class="mb-0 text-muted small">{{ bill.summary|truncatechars:100 }}</p>
+                                    {% endif %}
+                                </a>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No recent bills found.</p>
+                    {% endif %}
+                </div>
+                <div class="card-footer">
+                    <a href="{% url 'bills' %}" class="btn btn-primary btn-sm">View All Bills</a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right Column -->
+        <div class="col-md-4">
+            <!-- Upcoming Events -->
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Upcoming Events</h5>
+                </div>
+                <div class="card-body">
+                    {% if upcoming_events %}
+                        <div class="list-group">
+                            {% for event in upcoming_events %}
+                                <div class="list-group-item">
+                                    <h6>{{ event.title }}</h6>
+                                    <p class="mb-1">
+                                        <small>{{ event.start_datetime|date:"M d, Y H:i" }}</small>
+                                    </p>
+                                    <span class="badge bg-secondary">{{ event.get_event_type_display }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No upcoming events.</p>
+                    {% endif %}
+                </div>
+                <div class="card-footer">
+                    <a href="{% url 'legislative_calendar' %}" class="btn btn-info btn-sm">View Calendar</a>
+                </div>
+            </div>
+            
+            <!-- Party Distribution -->
+            {% if party_distribution %}
+            <div class="card mt-3">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Party Distribution</h5>
+                </div>
+                <div class="card-body">
+                    {% for party in party_distribution %}
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between">
+                                <span>{{ party.short_name|default:party.name }}</span>
+                                <span>{{ party.bill_count }} bills</span>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar" style="width: {% widthratio party.bill_count total_bills 100 %}%;"></div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

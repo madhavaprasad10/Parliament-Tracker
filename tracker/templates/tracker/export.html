@@ -1,0 +1,175 @@
+<!-- templates/tracker/export.html -->
+{% extends 'tracker/base.html' %}
+{% load static %}
+
+{% block title %}Export Data - Parliament Tracker{% endblock %}
+
+{% block extra_css %}
+<style>
+    .export-card {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .format-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 5px;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .format-badge:hover {
+        background: #1a237e;
+        color: white;
+    }
+    
+    .format-badge.active {
+        background: #1a237e;
+        color: white;
+    }
+    
+    .format-badge input {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mb-4">Export Data</h1>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <div class="export-card">
+                <h4>Export Options</h4>
+                <form method="post" action="{% url 'export' %}" id="exportForm">
+                    {% csrf_token %}
+                    
+                    <!-- Data Type Selection -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Select Data to Export</label>
+                        <div class="row">
+                            {% for type in data_types %}
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="data_type" 
+                                           id="type_{{ type.value }}" value="{{ type.value }}" 
+                                           {% if forloop.first %}checked{% endif %}>
+                                    <label class="form-check-label" for="type_{{ type.value }}">
+                                        <i class="bi {{ type.icon }}"></i> {{ type.label }}
+                                        <span class="badge bg-secondary">{{ type.count }} records</span>
+                                    </label>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <!-- Format Selection -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Export Format</label>
+                        <div class="d-flex gap-2">
+                            {% for format in export_formats %}
+                            <label class="format-badge">
+                                <input type="radio" name="format" value="{{ format.value }}" 
+                                       {% if forloop.first %}checked{% endif %}>
+                                <i class="bi {{ format.icon }}"></i> {{ format.label }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <!-- Filters (Optional) -->
+                    <div class="mb-4">
+                        <h5>Filters (Optional)</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label class="form-label">Status</label>
+                                <select name="filters[status]" class="form-select">
+                                    <option value="">All Statuses</option>
+                                    {% for value, label in status_choices %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Date From</label>
+                                <input type="date" name="filters[date_from]" class="form-control" value="{{ last_month|date:'Y-m-d' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Date To</label>
+                                <input type="date" name="filters[date_to]" class="form-control" value="{{ today|date:'Y-m-d' }}">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Additional Options -->
+                    <div class="mb-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="include_metadata" id="include_metadata" checked>
+                            <label class="form-check-label" for="include_metadata">
+                                Include metadata (IDs, timestamps, etc.)
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-download"></i> Export Data
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <!-- Statistics Card -->
+            <div class="export-card">
+                <h5>Database Statistics</h5>
+                <ul class="list-group">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Total Bills
+                        <span class="badge bg-primary rounded-pill">{{ total_records.bills }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Members of Parliament
+                        <span class="badge bg-primary rounded-pill">{{ total_records.mps }}</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Help Card -->
+            <div class="export-card">
+                <h5>Export Information</h5>
+                <p class="small text-muted">
+                    <i class="bi bi-info-circle"></i> 
+                    CSV files can be opened in Excel, Google Sheets, or any text editor.<br>
+                    JSON format is best for developers and APIs.<br>
+                    Excel format includes formatted spreadsheets.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Make format badges interactive
+    document.querySelectorAll('.format-badge').forEach(badge => {
+        badge.addEventListener('click', function() {
+            document.querySelectorAll('.format-badge').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            this.querySelector('input').checked = true;
+        });
+    });
+    
+    // Set active class on page load
+    document.querySelectorAll('.format-badge input:checked').forEach(input => {
+        input.parentElement.classList.add('active');
+    });
+</script>
+{% endblock %}
