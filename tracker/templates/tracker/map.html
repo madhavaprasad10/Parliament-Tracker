@@ -12,34 +12,6 @@
         border-radius: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .info {
-        padding: 6px 8px;
-        font: 14px/16px Arial, Helvetica, sans-serif;
-        background: white;
-        background: rgba(255,255,255,0.9);
-        box-shadow: 0 0 15px rgba(0,0,0,0.2);
-        border-radius: 5px;
-        border: 1px solid #ccc;
-    }
-    .info h4 {
-        margin: 0 0 5px;
-        color: #777;
-    }
-    .legend {
-        line-height: 18px;
-        color: #555;
-        background: white;
-        padding: 10px;
-        border-radius: 5px;
-        box-shadow: 0 0 15px rgba(0,0,0,0.1);
-    }
-    .legend i {
-        width: 18px;
-        height: 18px;
-        float: left;
-        margin-right: 8px;
-        opacity: 0.7;
-    }
     .filter-card {
         background: white;
         padding: 20px;
@@ -47,19 +19,44 @@
         margin-bottom: 20px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .loading-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(255,255,255,0.7);
-        display: none;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
+    .stats-card {
+        background: #f8f9fc;
+        border-left: 4px solid #4e73df;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px;
     }
-    .map-container {
+    .legend {
+        background: white;
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 0 15px rgba(0,0,0,0.1);
+        line-height: 1.5;
+    }
+    .legend i {
+        width: 18px;
+        height: 18px;
+        float: left;
+        margin-right: 8px;
+        opacity: 0.7;
+        border-radius: 50%;
+    }
+    .legend-item {
+        margin-bottom: 5px;
+        clear: both;
+    }
+    .loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255,255,255,0.8);
+        padding: 10px 20px;
+        border-radius: 5px;
+        z-index: 1000;
+        display: none;
+    }
+    #map-container {
         position: relative;
     }
 </style>
@@ -68,11 +65,10 @@
 {% block content %}
 <div class="container-fluid">
     <h1 class="h3 mb-4">Geographical Distribution of Bills</h1>
-    
+
     <!-- Filter Card -->
     <div class="filter-card">
         <form id="filter-form" class="row g-3">
-            {% csrf_token %}
             <div class="col-md-4">
                 <label class="form-label">Bill Status</label>
                 <select name="status" class="form-control" id="status-filter">
@@ -99,37 +95,33 @@
             </div>
         </form>
     </div>
-    
+
     <!-- Map and Stats Row -->
     <div class="row">
         <div class="col-md-9">
-            <div class="card map-container">
-                <div class="loading-overlay" id="loading-overlay">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="map"></div>
-                </div>
+            <div id="map-container">
+                <div class="loading" id="loading">Updating map...</div>
+                <div id="map"></div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="card-title mb-0">Statistics</h5>
-                </div>
-                <div class="card-body">
-                    <div id="stats">
-                        <p><strong>Total Bills:</strong> <span id="total-bills">{{ total_bills }}</span></p>
-                        <p><strong>States with Bills:</strong> <span id="states-count">0</span></p>
-                        <hr>
-                        <h6>Top States:</h6>
-                        <ul id="top-states" class="list-unstyled">
-                            <!-- Will be populated by JS -->
-                        </ul>
-                    </div>
-                </div>
+            <div class="stats-card">
+                <h5>Statistics</h5>
+                <p><strong>Total Bills:</strong> <span id="total-bills">{{ total_bills }}</span></p>
+                <p><strong>States with Bills:</strong> <span id="states-count">0</span></p>
+                <hr>
+                <h6>Top States:</h6>
+                <ul id="top-states" class="list-unstyled">
+                    <!-- populated by JS -->
+                </ul>
+            </div>
+            <div class="legend">
+                <h6>Party Color Legend</h6>
+                <div class="legend-item"><i style="background:#FF9933;"></i> BJP</div>
+                <div class="legend-item"><i style="background:#0000FF;"></i> INC</div>
+                <div class="legend-item"><i style="background:#28a745;"></i> Independent</div>
+                <div class="legend-item"><i style="background:#808080;"></i> Other/Unknown</div>
+                <p class="small text-muted mt-2">Circle size = number of bills</p>
             </div>
         </div>
     </div>
@@ -139,182 +131,112 @@
 {% block extra_js %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        let map;
-        let geojsonLayer;
-        
-        // Initialize map
-        function initMap() {
-            map = L.map('map').setView([22.0, 79.0], 5);
-            
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
-        }
-        
-        // Load GeoJSON and update map with data
-        function loadMapData() {
-            const status = document.getElementById('status-filter').value;
-            const year = document.getElementById('year-filter').value;
-            
-            // Show loading overlay
-            document.getElementById('loading-overlay').style.display = 'flex';
-            
-            // Fetch data via AJAX
-            fetch(`/map/?status=${status}&year=${year}`, {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Update statistics
-                updateStats(data.states_data, data.total_bills);
-                
-                // Load GeoJSON and update map
-                return fetch('https://raw.githubusercontent.com/geohacker/india/master/state/india_telangana.geojson')
-                    .then(response => response.json())
-                    .then(geojson => {
-                        updateMap(geojson, data.states_data);
-                    });
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                // Fallback to circles
-                addFallbackMarkers([]);
-            })
-            .finally(() => {
-                document.getElementById('loading-overlay').style.display = 'none';
-            });
-        }
-        
-        function updateMap(geojson, statesData) {
-            // Create a map of state -> count
-            const stateCounts = {};
-            statesData.forEach(item => {
-                stateCounts[item.state] = item.count;
-            });
-            
-            // Remove existing layer if any
-            if (geojsonLayer) {
-                map.removeLayer(geojsonLayer);
-            }
-            
-            // Add new layer
-            geojsonLayer = L.geoJson(geojson, {
-                style: function(feature) {
-                    const stateName = feature.properties.NAME_1;
-                    const count = stateCounts[stateName] || 0;
-                    return {
-                        fillColor: getColor(count),
-                        weight: 1,
-                        opacity: 1,
-                        color: 'white',
-                        fillOpacity: 0.7
-                    };
-                },
-                onEachFeature: function(feature, layer) {
-                    const stateName = feature.properties.NAME_1;
-                    const count = stateCounts[stateName] || 0;
-                    layer.bindPopup(`
-                        <b>${stateName}</b><br>
-                        Bills: ${count}<br>
-                        <a href="/bills/?search=${stateName}">View Bills</a>
-                    `);
-                    
-                    layer.on('mouseover', function() {
-                        this.setStyle({ fillOpacity: 0.9, weight: 2 });
-                    });
-                    layer.on('mouseout', function() {
-                        this.setStyle({ fillOpacity: 0.7, weight: 1 });
-                    });
-                }
-            }).addTo(map);
-            
-            // Fit map to bounds if first time
-            if (!map.getBounds().isValid()) {
-                map.fitBounds(geojsonLayer.getBounds());
-            }
-        }
-        
-        function getColor(count) {
-            return count > 10 ? '#800026' :
-                   count > 5  ? '#BD0026' :
-                   count > 3  ? '#E31A1C' :
-                   count > 1  ? '#FC4E2A' :
-                   count > 0  ? '#FD8D3C' :
-                                '#FFEDA0';
-        }
-        
-        function updateStats(statesData, totalBills) {
-            document.getElementById('total-bills').textContent = totalBills;
-            
-            const stateCounts = {};
-            statesData.forEach(item => {
-                stateCounts[item.state] = item.count;
-            });
-            
-            const states = Object.keys(stateCounts).filter(s => s !== 'Other');
-            document.getElementById('states-count').textContent = states.length;
-            
-            // Get top 5 states by count
-            const topStates = Object.entries(stateCounts)
-                .filter(([state]) => state !== 'Other')
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5);
-            
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize map centered on India
+    const map = L.map('map').setView([22.0, 79.0], 5);
+    
+    // Restrict view to roughly India (optional)
+    const southWest = L.latLng(6.0, 68.0);
+    const northEast = L.latLng(37.0, 97.0);
+    const bounds = L.latLngBounds(southWest, northEast);
+    map.setMaxBounds(bounds);
+    map.on('drag', function() {
+        map.panInsideBounds(bounds, { animate: false });
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // Static coordinates for states (from Django)
+    const stateCoords = {{ state_coords|safe }};
+
+    // Party color mapping
+    function getPartyColor(party) {
+        const partyLower = (party || '').toLowerCase();
+        if (partyLower.includes('bjp')) return '#FF9933';
+        if (partyLower.includes('inc') || partyLower.includes('congress')) return '#0000FF';
+        if (partyLower.includes('independent')) return '#28a745';
+        return '#808080'; // default gray
+    }
+
+    let currentLayerGroup = L.layerGroup().addTo(map);
+    let currentStatesData = [];
+
+    function updateMap() {
+        document.getElementById('loading').style.display = 'block';
+        const status = document.getElementById('status-filter').value;
+        const year = document.getElementById('year-filter').value;
+
+        fetch(`/map/?status=${status}&year=${year}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('loading').style.display = 'none';
+            currentStatesData = data.states;
+
+            // Update statistics
+            document.getElementById('total-bills').textContent = data.total_bills;
+            const statesWithBills = data.states.filter(s => s.count > 0).length;
+            document.getElementById('states-count').textContent = statesWithBills;
+
+            // Top 5 states by count
+            const topStates = [...data.states].sort((a,b) => b.count - a.count).slice(0,5);
             const topList = document.getElementById('top-states');
             topList.innerHTML = '';
-            topStates.forEach(([state, count]) => {
-                topList.innerHTML += `<li><strong>${state}:</strong> ${count} bills</li>`;
+            topStates.forEach(s => {
+                topList.innerHTML += `<li><strong>${s.state}:</strong> ${s.count} bills (${s.party})</li>`;
             });
-        }
-        
-        function addFallbackMarkers(statesData) {
-            // Fallback markers for major cities
-            const cities = [
-                { name: 'Delhi', lat: 28.6139, lon: 77.2090, count: 25 },
-                { name: 'Mumbai', lat: 19.0760, lon: 72.8777, count: 15 },
-                { name: 'Chennai', lat: 13.0827, lon: 80.2707, count: 12 },
-                { name: 'Kolkata', lat: 22.5726, lon: 88.3639, count: 8 },
-                { name: 'Bengaluru', lat: 12.9716, lon: 77.5946, count: 10 },
-                { name: 'Hyderabad', lat: 17.3850, lon: 78.4867, count: 7 }
-            ];
-            
-            if (geojsonLayer) {
-                map.removeLayer(geojsonLayer);
-            }
-            
-            cities.forEach(city => {
-                const radius = Math.sqrt(city.count) * 20000;
-                const color = getColor(city.count);
-                
-                L.circle([city.lat, city.lon], {
+
+            // Clear old circles
+            currentLayerGroup.clearLayers();
+
+            // Add new circles
+            data.states.forEach(state => {
+                if (state.count === 0) return;
+                const coords = stateCoords[state.state] || stateCoords['Other'];
+                const radius = Math.sqrt(state.count) * 30000; // scale factor
+                const color = getPartyColor(state.party);
+
+                const circle = L.circle(coords, {
                     color: color,
                     fillColor: color,
-                    fillOpacity: 0.5,
-                    radius: radius
-                })
-                .addTo(map)
-                .bindPopup(`<b>${city.name}</b><br>Bills: ${city.count}`);
+                    fillOpacity: 0.6,
+                    radius: radius,
+                    weight: 2
+                }).addTo(currentLayerGroup);
+
+                // Bind popup with state info
+                circle.bindPopup(`
+                    <b>${state.state}</b><br>
+                    Bills: ${state.count}<br>
+                    Dominant Party: ${state.party}
+                `);
+
+                // On click, go to bills list filtered by state
+                circle.on('click', function() {
+                    window.location.href = `/bills/?search=${encodeURIComponent(state.state)}`;
+                });
             });
-        }
-        
-        // Initialize map on page load
-        initMap();
-        
-        // Load initial data
-        loadMapData();
-        
-        // Update map on button click
-        document.getElementById('update-map').addEventListener('click', loadMapData);
-        
-        // Also update on filter change (optional)
-        document.getElementById('status-filter').addEventListener('change', loadMapData);
-        document.getElementById('year-filter').addEventListener('change', loadMapData);
-        
-        // Auto-refresh every 5 minutes to get new bills
-        setInterval(loadMapData, 5 * 60 * 1000); // 5 minutes
-    });
+        })
+        .catch(error => {
+            document.getElementById('loading').style.display = 'none';
+            console.error('Error updating map:', error);
+        });
+    }
+
+    // Initial load
+    updateMap();
+
+    // Update on button click or filter change
+    document.getElementById('update-map').addEventListener('click', updateMap);
+    document.getElementById('status-filter').addEventListener('change', updateMap);
+    document.getElementById('year-filter').addEventListener('change', updateMap);
+});
 </script>
 {% endblock %}
+// In the updateMap() function, inside the loop over data.states
+circle.on('click', function() {
+    window.location.href = `/bills/?state=${encodeURIComponent(state.state)}`;
+});

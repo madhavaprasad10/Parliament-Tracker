@@ -9,5 +9,7 @@ urlpatterns = [
     path('map/', views.map_view, name='map'),
     path('calendar/', views.calendar_view, name='calendar'),
     path('api/bills/', views.api_bills, name='api_bills'),
-    path('export/', views.export_bills, name='export_bills'),   # <-- this line
+    # Export
+    path('export/', views.export_page, name='export_page'),
+    path('export/download/', views.export_bills, name='export_bills'),
 ]

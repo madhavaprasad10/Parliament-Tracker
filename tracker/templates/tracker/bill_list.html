@@ -30,11 +30,9 @@
                         <select name="house" class="form-control" id="house-filter">
                             <option value="">All Houses</option>
                             {% for house in houses %}
-                                {% if house %}
                                 <option value="{{ house }}" {% if selected_house == house %}selected{% endif %}>
-                                    {{ house|title|cut:"_" }}
+                                    {{ house }}
                                 </option>
-                                {% endif %}
                             {% endfor %}
                         </select>
                     </div>
@@ -42,11 +40,9 @@
                         <select name="status" class="form-control" id="status-filter">
                             <option value="">All Status</option>
                             {% for status in statuses %}
-                                {% if status %}
                                 <option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>
                                     {{ status|title }}
                                 </option>
-                                {% endif %}
                             {% endfor %}
                         </select>
                     </div>
@@ -86,6 +82,7 @@
                             <th>House</th>
                             <th>Status</th>
                             <th>Introduced By</th>
+                            <th>Party</th>
                             <th>Date</th>
                             <th>Actions</th>
                         </tr>
@@ -93,40 +90,27 @@
                     <tbody>
                         {% for bill in page_obj %}
                         <tr>
-                            <td>
-                                <strong>{{ bill.bill_id }}</strong>
-                            </td>
+                            <td><strong>{{ bill.bill_id }}</strong></td>
                             <td>{{ bill.bill_number|default:"-" }}</td>
+                            <td><a href="{% url 'bill_detail' bill.id %}">{{ bill.title|truncatechars:80 }}</a></td>
+                            <td><span class="badge bg-info text-white">{{ bill.get_house_display|default:bill.house }}</span></td>
                             <td>
-                                <a href="{% url 'bill_detail' bill.id %}">
-                                    {{ bill.title|truncatechars:80 }}
-                                </a>
-                            </td>
-                            <td>
-                                <span class="badge bg-info text-white">
-                                    {{ bill.get_house_display|default:bill.house|title }}
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge {% if bill.status == 'PASSED' %}bg-success{% elif bill.status == 'PENDING' %}bg-warning{% elif bill.status == 'REJECTED' %}bg-danger{% else %}bg-secondary{% endif %}">
-                                    {{ bill.get_status_display|default:bill.status|title }}
+                                <span class="badge bg-{{ bill.status_color }}">
+                                    {{ bill.get_status_display|default:bill.status }}
                                 </span>
                             </td>
                             <td>{{ bill.introduced_by|default:"-"|truncatechars:30 }}</td>
+                            <td>{{ bill.introduced_by_party|default:"-" }}</td>
                             <td>{{ bill.introduction_date|date:"d M Y"|default:"-" }}</td>
                             <td>
-                                <a href="{% url 'bill_detail' bill.id %}" 
-                                   class="btn btn-sm btn-info" title="View Details">
+                                <a href="{% url 'bill_detail' bill.id %}" class="btn btn-sm btn-info" title="View Details">
                                     <i class="fas fa-eye"></i>
                                 </a>
                             </td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="8" class="text-center py-4">
-                                <i class="fas fa-file-alt fa-3x text-muted mb-3"></i>
-                                <p class="text-muted">No bills found matching your criteria.</p>
-                            </td>
+                            <td colspan="9" class="text-center py-4">No bills found</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -139,14 +123,10 @@
                 <ul class="pagination justify-content-center">
                     {% if page_obj.has_previous %}
                     <li class="page-item">
-                        <a class="page-link" href="?page=1{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="First">
-                            <span aria-hidden="true">&laquo;&laquo;</span>
-                        </a>
+                        <a class="page-link" href="?page=1{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}">&laquo;&laquo;</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="Previous">
-                            <span aria-hidden="true">&laquo;</span>
-                        </a>
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}">&laquo;</a>
                     </li>
                     {% endif %}
                     
@@ -156,14 +136,10 @@
                     
                     {% if page_obj.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="Next">
-                            <span aria-hidden="true">&raquo;</span>
-                        </a>
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}">&raquo;</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="Last">
-                            <span aria-hidden="true">&raquo;&raquo;</span>
-                        </a>
+                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&search={{ search_query }}{% endif %}{% if selected_house %}&house={{ selected_house }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}">&raquo;&raquo;</a>
                     </li>
                     {% endif %}
                 </ul>
@@ -174,32 +150,11 @@
 </div>
 
 <script>
-// Auto-submit on filter change
 document.getElementById('house-filter')?.addEventListener('change', function() {
     document.getElementById('filter-form').submit();
 });
-
 document.getElementById('status-filter')?.addEventListener('change', function() {
     document.getElementById('filter-form').submit();
 });
-
-// Search on Enter key
-document.getElementById('search-input')?.addEventListener('keyup', function(e) {
-    if (e.key === 'Enter') {
-        document.getElementById('filter-form').submit();
-    }
-});
 </script>
 {% endblock %}
-<div class="col-md-2 mb-3">
-    <select name="house" class="form-control" id="house-filter">
-        <option value="">All Houses</option>
-        {% for house in houses %}
-            {% if house %}
-            <option value="{{ house }}" {% if selected_house == house %}selected{% endif %}>
-                {{ house }}
-            </option>
-            {% endif %}
-        {% endfor %}
-    </select>
-</div>

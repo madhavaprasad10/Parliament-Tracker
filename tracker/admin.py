@@ -1,13 +1,12 @@
 # tracker/admin.py
 from django.contrib import admin
-from .models import Bill, BillUpdate, ScrapeSource  # Removed PoliticalParty
+from .models import Bill, BillUpdate, ScrapeSource
 
 @admin.register(Bill)
 class BillAdmin(admin.ModelAdmin):
-    """Admin configuration for Bill model"""
-    list_display = ('bill_id', 'title', 'house', 'status', 'introduction_date', 'source')
+    list_display = ('bill_id', 'title', 'house', 'status', 'introduction_date', 'source', 'state')
     list_filter = ('house', 'status', 'source', 'introduction_date')
-    search_fields = ('bill_id', 'title', 'bill_number', 'description')
+    search_fields = ('bill_id', 'title', 'bill_number', 'introduced_by', 'state')
     readonly_fields = ('id', 'created_at', 'updated_at')
     date_hierarchy = 'introduction_date'
     
@@ -24,6 +23,9 @@ class BillAdmin(admin.ModelAdmin):
         ('Sponsors', {
             'fields': ('introduced_by', 'introduced_by_mp', 'introduced_by_party', 'ministry')
         }),
+        ('Geography', {
+            'fields': ('state',)
+        }),
         ('Content', {
             'fields': ('description', 'objective')
         }),
@@ -38,7 +40,6 @@ class BillAdmin(admin.ModelAdmin):
 
 @admin.register(BillUpdate)
 class BillUpdateAdmin(admin.ModelAdmin):
-    """Admin configuration for BillUpdate model"""
     list_display = ('bill', 'update_type', 'update_date')
     list_filter = ('update_type', 'update_date')
     search_fields = ('bill__title', 'bill__bill_id', 'description')
@@ -47,7 +48,6 @@ class BillUpdateAdmin(admin.ModelAdmin):
 
 @admin.register(ScrapeSource)
 class ScrapeSourceAdmin(admin.ModelAdmin):
-    """Admin configuration for ScrapeSource model"""
     list_display = ('name', 'source_type', 'is_active', 'last_scraped')
     list_filter = ('source_type', 'is_active')
     search_fields = ('name', 'base_url')

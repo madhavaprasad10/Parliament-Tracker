@@ -20,6 +20,10 @@
         padding: 2px 4px;
         font-size: 0.85rem;
     }
+    .upcoming-event {
+        border: 2px dashed #007bff !important;
+        background-color: rgba(0,123,255,0.1) !important;
+    }
     .fc-daygrid-day-number {
         font-weight: 500;
         color: #1a237e;
@@ -81,10 +85,12 @@
     .day-bill-item.warning { border-left: 4px solid #ffc107; background-color: #fff3cd; }
     .day-bill-item.danger { border-left: 4px solid #dc3545; }
     .day-bill-item.secondary { border-left: 4px solid #6c757d; }
+    .day-bill-item.upcoming { border-left: 4px solid #007bff; background-color: #e6f2ff; }
     .badge-success { background-color: #28a745; color: white; padding: 3px 8px; border-radius: 4px; }
     .badge-warning { background-color: #ffc107; color: #212529; padding: 3px 8px; border-radius: 4px; }
     .badge-danger { background-color: #dc3545; color: white; padding: 3px 8px; border-radius: 4px; }
     .badge-secondary { background-color: #6c757d; color: white; padding: 3px 8px; border-radius: 4px; }
+    .badge-info { background-color: #17a2b8; color: white; padding: 3px 8px; border-radius: 4px; }
 </style>
 {% endblock %}
 
@@ -131,6 +137,14 @@
                 <option value="LOK_SABHA">Lok Sabha</option>
                 <option value="RAJYA_SABHA">Rajya Sabha</option>
                 <option value="BOTH">Both</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label class="form-label">Type</label>
+            <select class="form-control" id="type-filter">
+                <option value="all">All Bills</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="past">Past</option>
             </select>
         </div>
         <div>
@@ -194,7 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const calendarEl = document.getElementById('calendar');
     let calendar;
     let allEvents = [];
-    let isMoreLinkProcessing = false; // flag to prevent multiple triggers
+    let isMoreLinkProcessing = false;
 
     function getStatusColor(status) {
         switch(status) {
@@ -217,7 +231,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function formatDate(dateStr) {
-        if (!dateStr) return null; // Return null instead of "Unknown Date"
+        if (!dateStr) return null;
         try {
             const parts = dateStr.split('-');
             if (parts.length === 3) {
@@ -239,34 +253,47 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Create day modal dynamically
+    function createDayModal() {
+        const modalHtml = `
+            <div class="modal fade" id="dayModal" tabindex="-1">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title" id="dayModalTitle">Bills for </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="day-bill-list" class="day-bill-list"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        return document.getElementById('dayModal');
+    }
+
     function showDayBills(dateStr, events) {
-        const modalEl = document.getElementById('dayModal');
+        const existingModal = document.getElementById('dayModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        const modalEl = createDayModal();
         const modalTitle = document.getElementById('dayModalTitle');
         const modalBody = document.getElementById('day-bill-list');
 
-        // Clean up any existing modal instance
-        const existingModal = bootstrap.Modal.getInstance(modalEl);
-        if (existingModal) {
-            existingModal.hide();
-        }
-        // Remove any leftover backdrop
-        const backdrop = document.querySelector('.modal-backdrop');
-        if (backdrop) {
-            backdrop.remove();
-        }
-        document.body.classList.remove('modal-open');
-        document.body.style.overflow = '';
-
         const formattedDate = formatDate(dateStr);
         if (!formattedDate) {
-            // If date is invalid, do not show modal
             console.warn('Invalid date string:', dateStr);
-            isMoreLinkProcessing = false;
             return;
         }
 
         modalTitle.textContent = `Bills for ${formattedDate}`;
-
         modalBody.innerHTML = '';
 
         if (events && events.length > 0) {
@@ -275,19 +302,21 @@ document.addEventListener('DOMContentLoaded', function() {
             events.forEach(event => {
                 const status = event.extendedProps.status || 'PENDING';
                 const statusClass = getStatusClass(status);
-                const badgeClass = `badge-${statusClass}`;
+                const isUpcoming = event.extendedProps.is_upcoming;
+                const itemClass = isUpcoming ? 'upcoming' : statusClass;
+                const badgeClass = isUpcoming ? 'badge-info' : `badge-${statusClass}`;
                 const billId = event.extendedProps.id || event.id;
                 const house = event.extendedProps.house ? event.extendedProps.house.replace('_', ' ') : 'Unknown';
 
                 const itemDiv = document.createElement('div');
-                itemDiv.className = `day-bill-item ${statusClass}`;
+                itemDiv.className = `day-bill-item ${itemClass}`;
                 itemDiv.onclick = function() {
                     showBillDetails(billId);
                 };
                 itemDiv.innerHTML = `
                     <strong>${event.title}</strong><br>
                     <small>
-                        Status: <span class="${badgeClass}">${status}</span> |
+                        Status: <span class="${badgeClass}">${status}${isUpcoming ? ' (Upcoming)' : ''}</span> |
                         House: ${house} |
                         Introduced By: ${event.extendedProps.introduced_by || 'Unknown'}
                     </small>
@@ -300,18 +329,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const modal = new bootstrap.Modal(modalEl);
         modal.show();
+
+        modalEl.addEventListener('hidden.bs.modal', function() {
+            modalEl.remove();
+        }, { once: true });
     }
 
     window.showBillDetails = function(billId) {
         const modalEl = document.getElementById('billModal');
         const bill = allEvents.find(e => e.id === billId || e.extendedProps?.id === billId);
-        if (!bill) {
-            console.error('Bill not found:', billId);
-            return;
-        }
+        if (!bill) return;
 
         const statusClass = getStatusClass(bill.extendedProps.status);
         const badgeClass = `badge-${statusClass}`;
+        const isUpcoming = bill.extendedProps.is_upcoming;
 
         document.getElementById('modalTitle').textContent = bill.extendedProps.bill_id;
         document.getElementById('modalBody').innerHTML = `
@@ -320,9 +351,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     <h5>${bill.extendedProps.title}</h5>
                     <hr>
                     <table class="table table-bordered">
-                        <tr><th style="width: 150px;">Bill Number:</th><td>${bill.extendedProps.bill_number || '-'}</td></tr>
+                        <tr><th>Bill Number:</th><td>${bill.extendedProps.bill_number || '-'}</td></tr>
                         <tr><th>House:</th><td>${bill.extendedProps.house ? bill.extendedProps.house.replace('_', ' ') : 'Unknown'}</td></tr>
-                        <tr><th>Status:</th><td><span class="${badgeClass}">${bill.extendedProps.status || 'Unknown'}</span></td></tr>
+                        <tr><th>Status:</th><td><span class="${badgeClass}">${bill.extendedProps.status || 'Unknown'}${isUpcoming ? ' (Upcoming)' : ''}</span></td></tr>
                         <tr><th>Introduced:</th><td>${bill.extendedProps.introduction_date ? formatDate(bill.extendedProps.introduction_date) : '-'}</td></tr>
                         <tr><th>Introduced By:</th><td>${bill.extendedProps.introduced_by || '-'}</td></tr>
                         <tr><th>Ministry:</th><td>${bill.extendedProps.ministry || '-'}</td></tr>
@@ -332,7 +363,6 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         document.getElementById('modalViewLink').href = `/bills/${bill.extendedProps.id}/`;
 
-        // Clean up any previous modal instance
         const existingModal = bootstrap.Modal.getInstance(modalEl);
         if (existingModal) {
             existingModal.hide();
@@ -351,19 +381,28 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadEvents() {
         const status = document.getElementById('status-filter').value;
         const house = document.getElementById('house-filter').value;
+        const type = document.getElementById('type-filter').value;
 
         fetch(`/api/bills/?status=${status}&house=${house}&limit=1000`)
             .then(response => response.json())
             .then(data => {
-                allEvents = data.bills
-                    .filter(bill => bill.introduction_date)
-                    .map(bill => ({
-                        id: bill.id,
-                        title: `${bill.bill_id}: ${bill.title.substring(0, 40)}...`,
-                        start: bill.introduction_date,
-                        extendedProps: bill,
-                        color: getStatusColor(bill.status),
-                    }));
+                let filteredBills = data.bills.filter(bill => bill.introduction_date);
+
+                // Apply type filter
+                if (type === 'upcoming') {
+                    filteredBills = filteredBills.filter(bill => bill.is_upcoming);
+                } else if (type === 'past') {
+                    filteredBills = filteredBills.filter(bill => !bill.is_upcoming);
+                }
+
+                allEvents = filteredBills.map(bill => ({
+                    id: bill.id,
+                    title: `${bill.bill_id}: ${bill.title.substring(0, 40)}...`,
+                    start: bill.introduction_date,
+                    extendedProps: bill,
+                    color: getStatusColor(bill.status),
+                    className: bill.is_upcoming ? 'upcoming-event' : '',
+                }));
 
                 if (calendar) {
                     calendar.removeAllEvents();
@@ -387,33 +426,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         dayMaxEventRows: 3,
                         dayMaxEvents: 3,
                         moreLinkClick: function(info) {
-                            // Prevent multiple triggers
                             if (isMoreLinkProcessing) return false;
                             isMoreLinkProcessing = true;
 
                             info.jsEvent.preventDefault();
                             info.jsEvent.stopPropagation();
 
-                            // Robust date extraction
-                            let dateStr = info.dateStr;
-                            if (!dateStr) {
-                                // Fallback: try to get date from the cell element
-                                const cell = info.jsEvent.target.closest('.fc-daygrid-day');
-                                if (cell) {
-                                    dateStr = cell.getAttribute('data-date');
-                                }
-                            }
+                            const dayEvents = allEvents.filter(event => event.start === info.dateStr);
+                            showDayBills(info.dateStr, dayEvents);
 
-                            if (!dateStr) {
-                                console.error('Could not determine date for more link');
-                                isMoreLinkProcessing = false;
-                                return false;
-                            }
-
-                            const dayEvents = allEvents.filter(event => event.start === dateStr);
-                            showDayBills(dateStr, dayEvents);
-
-                            // Reset flag after a short delay to allow modal to open
                             setTimeout(() => { isMoreLinkProcessing = false; }, 500);
                             return false;
                         }
@@ -421,9 +442,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     calendar.render();
                 }
             })
-            .catch(error => {
-                console.error('Error loading events:', error);
-            });
+            .catch(error => console.error('Error loading events:', error));
     }
 
     // Initial load
@@ -431,6 +450,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Apply filters
     document.getElementById('apply-filters').addEventListener('click', loadEvents);
+    document.getElementById('status-filter').addEventListener('change', loadEvents);
+    document.getElementById('house-filter').addEventListener('change', loadEvents);
+    document.getElementById('type-filter').addEventListener('change', loadEvents);
 
     // Export iCal with current filters
     document.getElementById('export-ical').addEventListener('click', function(e) {
@@ -442,10 +464,6 @@ document.addEventListener('DOMContentLoaded', function() {
         url.searchParams.set('format', 'ical');
         window.location.href = url.toString();
     });
-
-    // Auto-refresh filters on change
-    document.getElementById('status-filter').addEventListener('change', loadEvents);
-    document.getElementById('house-filter').addEventListener('change', loadEvents);
 });
 </script>
 {% endblock %}

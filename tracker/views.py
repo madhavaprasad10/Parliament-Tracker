@@ -21,39 +21,28 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
 from .models import Bill
+
 class DashboardView(TemplateView):
     """Dashboard home page"""
     template_name = 'tracker/dashboard.html'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        
-        # Get statistics
         context['total_bills'] = Bill.objects.count()
         context['pending_bills'] = Bill.objects.filter(status='PENDING').count()
         context['passed_bills'] = Bill.objects.filter(status='PASSED').count()
         context['rejected_bills'] = Bill.objects.filter(status='REJECTED').count()
         context['loksabha_bills'] = Bill.objects.filter(house='LOK_SABHA').count()
         context['rajyasabha_bills'] = Bill.objects.filter(house='RAJYA_SABHA').count()
-        
-        # Get recent bills - show a mix of Lok Sabha and Rajya Sabha
-        recent_ls = Bill.objects.filter(house='LOK_SABHA').order_by('-introduction_date')[:5]
-        recent_rs = Bill.objects.filter(house='RAJYA_SABHA').order_by('-introduction_date')[:5]
-        
-        # Combine and sort by date
-        recent_bills = sorted(
-            list(recent_ls) + list(recent_rs),
-            key=lambda x: x.introduction_date or x.created_at,
-            reverse=True
-        )[:10]
-        
-        context['recent_bills'] = recent_bills
-        
+        context['recent_bills'] = Bill.objects.order_by('-introduction_date')[:10]
         return context
+
+
+# tracker/views.py (only relevant parts, keep the rest of your views as is)
 
 def bill_list(request):
     bills = Bill.objects.all().order_by('-introduction_date')
-
+    
     # Search
     search_query = request.GET.get('search', '')
     if search_query:
@@ -63,7 +52,12 @@ def bill_list(request):
             models.Q(bill_number__icontains=search_query) |
             models.Q(introduced_by__icontains=search_query)
         )
-
+    
+    # Filter by state (new)
+    state_param = request.GET.get('state', '')
+    if state_param:
+        bills = bills.filter(state__icontains=state_param)
+    
     # House filter
     house_param = request.GET.get('house', '')
     house_map = {
@@ -75,35 +69,36 @@ def bill_list(request):
     if house_param:
         db_house = house_map.get(house_param, house_param)
         bills = bills.filter(house=db_house)
-
+    
     # Status filter
     status_param = request.GET.get('status', '')
     if status_param:
         bills = bills.filter(status=status_param.upper())
-
+    
     # Pagination
     paginator = Paginator(bills, 20)
     page_number = request.GET.get('page', 1)
     page_obj = paginator.get_page(page_number)
-
+    
     # Distinct houses for filter dropdown
     db_houses = set(Bill.objects.exclude(house__isnull=True).exclude(house='')
-                    .values_list('house', flat=True).distinct())
+                   .values_list('house', flat=True).distinct())
     valid_houses = {'LOK_SABHA', 'RAJYA_SABHA', 'BOTH'}
-    houses_to_show = [reverse_map.get(h, h.title().replace('_', ' '))
+    houses_to_show = [reverse_map.get(h, h.title().replace('_', ' ')) 
                       for h in db_houses if h in valid_houses]
-
+    
     # Distinct statuses for filter dropdown
     db_statuses = set(Bill.objects.exclude(status__isnull=True).exclude(status='')
-                      .values_list('status', flat=True).distinct())
+                     .values_list('status', flat=True).distinct())
     valid_statuses = {'PENDING', 'PASSED', 'REJECTED', 'WITHDRAWN', 'LAPSED'}
     statuses_to_show = [s for s in db_statuses if s in valid_statuses]
-
+    
     context = {
         'page_obj': page_obj,
         'search_query': search_query,
         'selected_house': house_param,
         'selected_status': status_param,
+        'selected_state': state_param,  # optional
         'houses': houses_to_show,
         'statuses': statuses_to_show,
         'total_count': bills.count(),
@@ -111,114 +106,80 @@ def bill_list(request):
     return render(request, 'tracker/bill_list.html', context)
 
 
-def bill_detail(request, pk):
-    bill = get_object_or_404(Bill, pk=pk)
-    return render(request, 'tracker/bill_detail.html', {'bill': bill})
-
-
-def analytics(request):
-    status_counts = list(Bill.objects.values('status').annotate(count=models.Count('status')))
-    house_counts = list(Bill.objects.values('house').annotate(count=models.Count('house')))
-
-    # Monthly trends (last 12 months)
-    monthly_data = []
-    for i in range(11, -1, -1):
-        date = timezone.now().date() - timedelta(days=30*i)
-        month_start = date.replace(day=1)
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year+1, month=1, day=1) - timedelta(days=1)
-        else:
-            month_end = month_start.replace(month=month_start.month+1, day=1) - timedelta(days=1)
-
-        count = Bill.objects.filter(
-            introduction_date__gte=month_start,
-            introduction_date__lte=month_end
-        ).count()
-        monthly_data.append({'month': month_start.strftime('%b %Y'), 'count': count})
-
-    context = {
-        'status_counts': json.dumps(status_counts),
-        'house_counts': json.dumps(house_counts),
-        'monthly_data': json.dumps(monthly_data),
-        'total_bills': Bill.objects.count(),
-    }
-    return render(request, 'tracker/analytics.html', context)
-
-
+# tracker/views.py (add/update this function)
 def map_view(request):
-    """Map view with AJAX support"""
+    """Map view with real‑time AJAX updates and color‑coded circles."""
+    from django.db.models import Count
+    from django.http import JsonResponse
+    import json
+
+    # Get filter parameters
     status_filter = request.GET.get('status', 'all')
     year_filter = request.GET.get('year', 'all')
 
+    # Base queryset
     bills = Bill.objects.all()
+
+    # Apply filters
     if status_filter != 'all':
         bills = bills.filter(status=status_filter)
     if year_filter != 'all' and year_filter:
         bills = bills.filter(introduction_date__year=year_filter)
 
-    # Simplified state mapping based on introducer/title
-    minister_state_map = {
-        'Minister of Finance': 'Maharashtra',
-        'Minister of Home Affairs': 'Delhi',
-        'Minister of Defence': 'Uttar Pradesh',
-        'Minister of External Affairs': 'Delhi',
-        'Minister of Law and Justice': 'West Bengal',
-        'Minister of Electronics & IT': 'Karnataka',
-        'Minister of Science and Technology': 'Tamil Nadu',
-        'Minister of Ports and Shipping': 'Gujarat',
-        'Minister of Labour and Employment': 'Bihar',
-        'Minister of Health and Family Welfare': 'Madhya Pradesh',
-        'Minister of Education': 'Rajasthan',
-        'Minister of Agriculture': 'Punjab',
-        'Minister of Railways': 'Odisha',
-        'Minister of Coal': 'Jharkhand',
-        'Minister of Petroleum': 'Assam',
-        'Minister of Steel': 'Jharkhand',
-        'Minister of Textiles': 'Gujarat',
-        'Minister of Commerce': 'Tamil Nadu',
-    }
-
-    state_counts = {}
+    # Count bills by state (using the Bill.state field)
+    state_data = {}
     for bill in bills:
-        introducer = bill.introduced_by or ''
-        state = 'Other'
-        for minister, st in minister_state_map.items():
-            if minister.lower() in introducer.lower():
-                state = st
-                break
-        if state == 'Other' and bill.title:
-            title_lower = bill.title.lower()
-            if 'delhi' in title_lower:
-                state = 'Delhi'
-            elif 'maharashtra' in title_lower or 'mumbai' in title_lower:
-                state = 'Maharashtra'
-            elif 'tamil nadu' in title_lower or 'chennai' in title_lower:
-                state = 'Tamil Nadu'
-            elif 'west bengal' in title_lower or 'kolkata' in title_lower:
-                state = 'West Bengal'
-            elif 'karnataka' in title_lower or 'bangalore' in title_lower:
-                state = 'Karnataka'
-            elif 'telangana' in title_lower or 'hyderabad' in title_lower:
-                state = 'Telangana'
-            elif 'gujarat' in title_lower or 'ahmedabad' in title_lower:
-                state = 'Gujarat'
-        state_counts[state] = state_counts.get(state, 0) + 1
+        state = bill.state or 'Other'
+        if state not in state_data:
+            state_data[state] = {'count': 0, 'parties': {}}
+        state_data[state]['count'] += 1
+        party = bill.introduced_by_party or 'Unknown'
+        state_data[state]['parties'][party] = state_data[state]['parties'].get(party, 0) + 1
 
-    states_data = [{'state': s, 'count': c} for s, c in state_counts.items()]
+    # Prepare data for map
+    states_list = []
+    for state, data in state_data.items():
+        dominant_party = max(data['parties'].items(), key=lambda x: x[1])[0] if data['parties'] else 'Unknown'
+        states_list.append({
+            'state': state,
+            'count': data['count'],
+            'party': dominant_party,
+        })
 
-    # Distinct years for filter
+    # Distinct years for filter dropdown
     years = Bill.objects.exclude(introduction_date__isnull=True).dates('introduction_date', 'year')
     years_list = [y.year for y in years]
 
-    # AJAX response
+    # If AJAX request, return JSON
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({
-            'states_data': states_data,
+            'states': states_list,
             'total_bills': bills.count(),
         })
 
+    # Coordinates for states (same as before)
+    state_coords = {
+        'Delhi': [28.6139, 77.2090],
+        'Maharashtra': [19.7515, 75.7139],
+        'Uttar Pradesh': [26.8467, 80.9462],
+        'West Bengal': [22.9868, 87.8550],
+        'Karnataka': [15.3173, 75.7139],
+        'Tamil Nadu': [11.1271, 78.6569],
+        'Gujarat': [22.2587, 71.1924],
+        'Bihar': [25.0961, 85.3131],
+        'Madhya Pradesh': [23.2599, 77.4126],
+        'Rajasthan': [27.0238, 74.2179],
+        'Punjab': [31.1471, 75.3412],
+        'Odisha': [20.9517, 85.0985],
+        'Jharkhand': [23.6102, 85.2799],
+        'Assam': [26.2006, 92.9376],
+        'Telangana': [17.1232, 79.2088],
+        'Other': [22.0, 79.0],
+    }
+
     context = {
-        'bills_data': json.dumps(states_data),
+        'states_data': json.dumps(states_list),
+        'state_coords': json.dumps(state_coords),
         'total_bills': bills.count(),
         'status_filter': status_filter,
         'year_filter': year_filter,
@@ -226,15 +187,114 @@ def map_view(request):
     }
     return render(request, 'tracker/map.html', context)
 
+def bill_detail(request, pk):
+    bill = get_object_or_404(Bill, pk=pk)
+    return render(request, 'tracker/bill_detail.html', {'bill': bill})
+
+
+def analytics(request):
+    """Enhanced analytics dashboard with ministry and party breakdowns"""
+    from django.db.models import Count, Q
+    import json
+    from datetime import datetime, timedelta
+    from django.utils import timezone
+
+    total_bills = Bill.objects.count()
+    ls_count = Bill.objects.filter(house='LOK_SABHA').count()
+    rs_count = Bill.objects.filter(house='RAJYA_SABHA').count()
+    both_count = Bill.objects.filter(house='BOTH').count()
+
+    status_counts = list(Bill.objects.values('status').annotate(count=Count('status')))
+    house_counts = [
+        {'house': 'Lok Sabha', 'count': ls_count},
+        {'house': 'Rajya Sabha', 'count': rs_count},
+        {'house': 'Both', 'count': both_count},
+    ]
+
+    ministry_counts = list(Bill.objects.exclude(ministry__isnull=True).exclude(ministry='')
+                          .values('ministry').annotate(count=Count('ministry')).order_by('-count')[:10])
+
+    party_counts = list(Bill.objects.exclude(introduced_by_party__isnull=True).exclude(introduced_by_party='')
+                       .values('introduced_by_party').annotate(count=Count('introduced_by_party')).order_by('-count'))
+
+    monthly_data = []
+    today = timezone.now().date()
+    for i in range(11, -1, -1):
+        month_date = today - timedelta(days=30*i)
+        month_start = month_date.replace(day=1)
+        if month_start.month == 12:
+            month_end = month_start.replace(year=month_start.year+1, month=1, day=1) - timedelta(days=1)
+        else:
+            month_end = month_start.replace(month=month_start.month+1, day=1) - timedelta(days=1)
+        month_bills = Bill.objects.filter(introduction_date__gte=month_start, introduction_date__lte=month_end)
+        monthly_data.append({
+            'month': month_start.strftime('%b %Y'),
+            'total': month_bills.count(),
+            'ls_count': month_bills.filter(house='LOK_SABHA').count(),
+            'rs_count': month_bills.filter(house='RAJYA_SABHA').count(),
+            'passed': month_bills.filter(status='PASSED').count(),
+            'pending': month_bills.filter(status='PENDING').count(),
+            'rejected': month_bills.filter(status__in=['REJECTED', 'WITHDRAWN', 'LAPSED']).count(),
+        })
+
+    ministry_success = []
+    for mc in ministry_counts:
+        ministry = mc['ministry']
+        total = mc['count']
+        passed = Bill.objects.filter(ministry=ministry, status='PASSED').count()
+        success_rate = (passed / total * 100) if total > 0 else 0
+        ministry_success.append({
+            'ministry': ministry,
+            'total': total,
+            'passed': passed,
+            'success_rate': round(success_rate, 1)
+        })
+
+    party_success = []
+    for pc in party_counts:
+        party = pc['introduced_by_party']
+        total = pc['count']
+        passed = Bill.objects.filter(introduced_by_party=party, status='PASSED').count()
+        success_rate = (passed / total * 100) if total > 0 else 0
+        party_success.append({
+            'party': party,
+            'total': total,
+            'passed': passed,
+            'success_rate': round(success_rate, 1)
+        })
+
+    context = {
+        'total_bills': total_bills,
+        'ls_count': ls_count,
+        'rs_count': rs_count,
+        'both_count': both_count,
+        'status_counts': json.dumps(status_counts),
+        'house_counts': json.dumps(house_counts),
+        'ministry_counts': json.dumps(ministry_counts),
+        'party_counts': json.dumps(party_counts),
+        'ministry_success': json.dumps(ministry_success),
+        'party_success': json.dumps(party_success),
+        'monthly_data': json.dumps(monthly_data),
+    }
+    return render(request, 'tracker/analytics.html', context)
+
+
+
 
 def calendar_view(request):
+    """Calendar view for bill introduction dates"""
     year = request.GET.get('year')
     month = request.GET.get('month')
 
     bills = Bill.objects.exclude(introduction_date__isnull=True)
-    if year and month:
-        bills = bills.filter(introduction_date__year=year, introduction_date__month=month)
 
+    if year and month:
+        bills = bills.filter(
+            introduction_date__year=year,
+            introduction_date__month=month
+        )
+
+    # Prepare calendar data
     events = []
     for bill in bills:
         if bill.introduction_date:
@@ -256,32 +316,26 @@ def calendar_view(request):
     }
     return render(request, 'tracker/calendar.html', context)
 
-
 def api_bills(request):
-    """API endpoint for bills"""
+    from django.utils import timezone
     bills = Bill.objects.all().order_by('-introduction_date')
     
     # Apply filters
     house = request.GET.get('house')
     if house and house != 'all':
         bills = bills.filter(house=house)
-    
     status = request.GET.get('status')
     if status and status != 'all':
         bills = bills.filter(status=status)
-    
     search = request.GET.get('search')
     if search:
         bills = bills.filter(
             models.Q(title__icontains=search) |
-            models.Q(bill_id__icontains=search) |
-            models.Q(bill_number__icontains=search)
+            models.Q(bill_id__icontains=search)
         )
-    
     date = request.GET.get('date')
     if date:
         bills = bills.filter(introduction_date=date)
-    
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     if start_date and end_date:
@@ -289,10 +343,10 @@ def api_bills(request):
             introduction_date__gte=start_date,
             introduction_date__lte=end_date
         )
-    
     limit = int(request.GET.get('limit', 500))
     bills = bills[:limit]
-    
+
+    today = timezone.now().date()
     data = [{
         'id': str(bill.id),
         'bill_id': bill.bill_id,
@@ -303,25 +357,20 @@ def api_bills(request):
         'introduction_date': bill.introduction_date.isoformat() if bill.introduction_date else None,
         'introduced_by': bill.introduced_by or '',
         'ministry': bill.ministry or '',
-        'url': f"/bills/{bill.id}/"
+        'url': f"/bills/{bill.id}/",
+        'is_upcoming': bill.introduction_date > today if bill.introduction_date else False,
     } for bill in bills]
-    
-    return JsonResponse({
-        'bills': data,
-        'count': len(data),
-        'total': Bill.objects.count()
-    })
 
-
+    return JsonResponse({'bills': data, 'count': len(data), 'total': Bill.objects.count()})
 def trigger_scrape(request):
-    """Manual scrape trigger (uses scraper module)"""
+    """Trigger manual scraping of bills"""
     if request.method == 'POST':
         source = request.POST.get('source', 'all')
         try:
             from .scraper import RealBillScraper
             scraper = RealBillScraper()
             if source == 'all':
-                result = scraper.scrape_all()
+                result = scraper.scrape_today_bills()
                 message = "Scraping completed for all sources"
             elif source == 'MPA':
                 result = scraper.scrape_mpa_bills()
@@ -332,7 +381,6 @@ def trigger_scrape(request):
         except Exception as e:
             return JsonResponse({'status': 'error', 'message': f'Scraping failed: {str(e)}'})
 
-    # GET request – show form
     sources = [
         {'id': 'all', 'name': 'All Sources'},
         {'id': 'MPA', 'name': 'MPA (Ministry of Parliamentary Affairs)'},
@@ -340,9 +388,60 @@ def trigger_scrape(request):
     return render(request, 'tracker/scrape.html', {'sources': sources})
 
 
+def export_page(request):
+    """Render export filter form."""
+    # Get distinct ministries and parties for dropdowns
+    ministries = Bill.objects.exclude(ministry__isnull=True).exclude(ministry='')\
+                     .values_list('ministry', flat=True).distinct().order_by('ministry')
+    parties = Bill.objects.exclude(introduced_by_party__isnull=True).exclude(introduced_by_party='')\
+                  .values_list('introduced_by_party', flat=True).distinct().order_by('introduced_by_party')
+    # Also get years (optional, for date range picker context)
+    years = Bill.objects.exclude(introduction_date__isnull=True).dates('introduction_date', 'year')
+    years_list = [y.year for y in years]
+    return render(request, 'tracker/export.html', {
+        'ministries': ministries,
+        'parties': parties,
+        'years': years_list,
+    })
+
+
 def export_bills(request):
-    """Export bills in CSV, JSON, Excel, or PDF"""
+    """Export bills in various formats with filters."""
+    from django.db import models
+    import csv
+    import json
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib import colors
+    import io
+
     bills = Bill.objects.all().order_by('-introduction_date')
+
+    # Apply filters
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    ministry = request.GET.get('ministry')
+    party = request.GET.get('party')
+    house = request.GET.get('house')
+    status = request.GET.get('status')
+
+    if start_date:
+        bills = bills.filter(introduction_date__gte=start_date)
+    if end_date:
+        bills = bills.filter(introduction_date__lte=end_date)
+    if ministry:
+        bills = bills.filter(ministry=ministry)
+    if party:
+        bills = bills.filter(introduced_by_party=party)
+    if house and house != 'all':
+        bills = bills.filter(house=house)
+    if status and status != 'all':
+        bills = bills.filter(status=status)
+
+    # Prepare data
     data = []
     for bill in bills:
         data.append({
@@ -352,13 +451,16 @@ def export_bills(request):
             'house': bill.get_house_display() if hasattr(bill, 'get_house_display') else bill.house,
             'status': bill.get_status_display() if hasattr(bill, 'get_status_display') else bill.status,
             'introduced_by': bill.introduced_by or '',
+            'introduced_by_party': bill.introduced_by_party or '',
             'introduction_date': bill.introduction_date.strftime('%d %b %Y') if bill.introduction_date else '',
             'ministry': bill.ministry or '',
+            'state': bill.state or '',
             'source': bill.source or '',
         })
 
     fmt = request.GET.get('format', 'csv')
 
+    # CSV
     if fmt == 'csv':
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="bills.csv"'
@@ -368,9 +470,11 @@ def export_bills(request):
             writer.writerows(data)
         return response
 
+    # JSON
     elif fmt == 'json':
         return JsonResponse(data, safe=False)
 
+    # Excel
     elif fmt == 'xlsx':
         wb = Workbook()
         ws = wb.active
@@ -384,6 +488,7 @@ def export_bills(request):
             for row, bill in enumerate(data, 2):
                 for col, key in enumerate(headers, 1):
                     ws.cell(row=row, column=col, value=bill[key])
+            # Auto‑fit columns
             for col in ws.columns:
                 max_len = 0
                 col_letter = col[0].column_letter
@@ -399,6 +504,7 @@ def export_bills(request):
         wb.save(response)
         return response
 
+    # PDF
     elif fmt == 'pdf':
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
@@ -431,76 +537,3 @@ def export_bills(request):
 
     else:
         return HttpResponse("Invalid format", status=400)
-def analytics(request):
-    """Analytics dashboard"""
-    from django.db.models import Count, Q
-    import json
-    from datetime import datetime, timedelta
-    from django.utils import timezone
-    
-    # Get statistics for charts
-    status_counts = list(Bill.objects.values('status').annotate(count=Count('status')))
-    
-    # Get house counts
-    ls_count = Bill.objects.filter(house='LOK_SABHA').count()
-    rs_count = Bill.objects.filter(house='RAJYA_SABHA').count()
-    both_count = Bill.objects.filter(house='BOTH').count()
-    
-    house_counts = []
-    if ls_count > 0:
-        house_counts.append({'house': 'LOK_SABHA', 'count': ls_count})
-    if rs_count > 0:
-        house_counts.append({'house': 'RAJYA_SABHA', 'count': rs_count})
-    if both_count > 0:
-        house_counts.append({'house': 'BOTH', 'count': both_count})
-    
-    # Monthly trends (last 12 months)
-    monthly_data = []
-    today = timezone.now().date()
-    
-    for i in range(11, -1, -1):
-        # Calculate month start and end
-        month_date = today - timedelta(days=30*i)
-        month_start = month_date.replace(day=1)
-        
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year+1, month=1, day=1) - timedelta(days=1)
-        else:
-            month_end = month_start.replace(month=month_start.month+1, day=1) - timedelta(days=1)
-        
-        # Get bills for this month
-        month_bills = Bill.objects.filter(
-            introduction_date__gte=month_start,
-            introduction_date__lte=month_end
-        )
-        
-        # Calculate counts
-        total = month_bills.count()
-        ls_month = month_bills.filter(house='LOK_SABHA').count()
-        rs_month = month_bills.filter(house='RAJYA_SABHA').count()
-        passed = month_bills.filter(status='PASSED').count()
-        pending = month_bills.filter(status='PENDING').count()
-        rejected = month_bills.filter(
-            Q(status='REJECTED') | Q(status='WITHDRAWN') | Q(status='LAPSED')
-        ).count()
-        
-        monthly_data.append({
-            'month': month_start.strftime('%b %Y'),
-            'total': total,
-            'ls_count': ls_month,
-            'rs_count': rs_month,
-            'passed': passed,
-            'pending': pending,
-            'rejected': rejected,
-        })
-    
-    context = {
-        'status_counts': json.dumps(status_counts),
-        'house_counts': json.dumps(house_counts),
-        'monthly_data': json.dumps(monthly_data),
-        'total_bills': Bill.objects.count(),
-        'ls_count': ls_count,
-        'rs_count': rs_count,
-        'both_count': both_count,
-    }
-    return render(request, 'tracker/analytics.html', context)

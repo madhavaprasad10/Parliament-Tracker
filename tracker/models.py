@@ -48,6 +48,9 @@ class Bill(models.Model):
     # Ministry
     ministry = models.CharField(max_length=200, blank=True)
     
+    # State (inferred from minister/title)
+    state = models.CharField(max_length=100, blank=True)
+    
     # Description
     description = models.TextField(blank=True)
     objective = models.TextField(blank=True)
@@ -75,6 +78,7 @@ class Bill(models.Model):
             models.Index(fields=['house']),
             models.Index(fields=['status']),
             models.Index(fields=['introduction_date']),
+            models.Index(fields=['state']),
         ]
     
     def __str__(self):
@@ -83,10 +87,6 @@ class Bill(models.Model):
     def get_absolute_url(self):
         from django.urls import reverse
         return reverse('bill_detail', args=[str(self.id)])
-    
-    @property
-    def display_id(self):
-        return self.bill_id or f"BILL-{str(self.id)[:8]}"
     
     @property
     def status_color(self):
@@ -101,36 +101,30 @@ class Bill(models.Model):
 
 
 class BillUpdate(models.Model):
-    """Track updates to bills"""
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='updates')
     update_date = models.DateTimeField(default=timezone.now)
-    update_type = models.CharField(max_length=50)  # STATUS_CHANGE, AMENDMENT, etc.
+    update_type = models.CharField(max_length=50)
     description = models.TextField()
     old_value = models.TextField(blank=True)
     new_value = models.TextField(blank=True)
     
     class Meta:
         ordering = ['-update_date']
-    
-    def __str__(self):
-        return f"{self.bill.bill_id} - {self.update_type} - {self.update_date.strftime('%Y-%m-%d')}"
 
 
 class ScrapeSource(models.Model):
-    """Sources for scraping bills"""
     SOURCE_TYPES = [
         ('PRS', 'PRS India'),
         ('LOK_SABHA', 'Lok Sabha'),
         ('RAJYA_SABHA', 'Rajya Sabha'),
     ]
-    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     source_type = models.CharField(max_length=20, choices=SOURCE_TYPES)
     base_url = models.URLField(max_length=500)
     is_active = models.BooleanField(default=True)
     last_scraped = models.DateTimeField(null=True, blank=True)
-    scrape_frequency = models.IntegerField(default=24)  # hours
+    scrape_frequency = models.IntegerField(default=24)
     
     def __str__(self):
         return f"{self.name} ({self.source_type})"
